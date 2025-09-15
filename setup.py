@@ -25,13 +25,13 @@ from shutil import rmtree
 from setuptools import find_packages, setup, Command
 
 # Package meta-data.
-NAME = "audioldm"
-DESCRIPTION = "This package is written for text-to-audio generation."
-URL = "https://github.com/haoheliu/audioldm"
-EMAIL = "haoheliu@gmail.com"
-AUTHOR = "Haohe Liu"
+NAME = "sans"
+DESCRIPTION = "This package is for ASD."
+URL = "https://github.com/jsk4074/SANS"
+EMAIL = "2343783@donga.ac.kr"
+AUTHOR = "JeongSik Kim"
 REQUIRES_PYTHON = ">=3.8.0"
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 # What packages are required for this module to be executed?
 REQUIRED = [
