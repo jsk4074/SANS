@@ -160,5 +160,5 @@ setup(
     cmdclass={
         "upload": UploadCommand,
     },
-    scripts=["bin/audioldm.cmd", "bin/audioldm"],
+    scripts=["bin/sans.cmd", "bin/sans"],
 )

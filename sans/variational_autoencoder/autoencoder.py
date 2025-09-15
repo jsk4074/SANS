@@ -1,9 +1,9 @@
 import torch
-from audioldm.latent_diffusion.ema import *
-from audioldm.variational_autoencoder.modules import Encoder, Decoder
-from audioldm.variational_autoencoder.distributions import DiagonalGaussianDistribution
+from sans.latent_diffusion.ema import *
+from sans.variational_autoencoder.modules import Encoder, Decoder
+from sans.variational_autoencoder.distributions import DiagonalGaussianDistribution
 
-from audioldm.hifigan.utilities import get_vocoder, vocoder_infer
+from sans.hifigan.utilities import get_vocoder, vocoder_infer
 
 
 class AutoencoderKL(nn.Module):

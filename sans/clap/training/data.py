@@ -7,7 +7,7 @@ import random
 
 # import h5py
 from dataclasses import dataclass
-from audioldm.clap.training.params import parse_args
+from sans.clap.training.params import parse_args
 
 # import braceexpand
 import numpy as np
@@ -29,11 +29,11 @@ from pathlib import Path
 
 # import wget
 
-from audioldm.clap.open_clip.utils import (
+from sans.clap.open_clip.utils import (
     get_tar_path_from_dataset_name,
     dataset_split,
 )
-from audioldm.clap.open_clip.utils import load_p, load_class_label
+from sans.clap.open_clip.utils import load_p, load_class_label
 import copy
 
 try:
@@ -46,7 +46,7 @@ try:
 except ImportError:
     torchaudio = None
 
-from audioldm.clap.open_clip import tokenize
+from sans.clap.open_clip import tokenize
 
 
 def tokenizer(text):

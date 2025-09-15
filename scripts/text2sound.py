@@ -1,5 +1,5 @@
 import os
-from audioldm import text_to_audio, build_model, save_wave
+from sans import text_to_audio, build_model, save_wave
 
 import argparse
 

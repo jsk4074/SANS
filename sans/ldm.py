@@ -3,11 +3,11 @@ import os
 import torch
 import numpy as np
 from tqdm import tqdm
-from audioldm.utils import default, instantiate_from_config, save_wave
-from audioldm.latent_diffusion.ddpm import DDPM
-from audioldm.variational_autoencoder.distributions import DiagonalGaussianDistribution
-from audioldm.latent_diffusion.util import noise_like
-from audioldm.latent_diffusion.ddim import DDIMSampler
+from sans.utils import default, instantiate_from_config, save_wave
+from sans.latent_diffusion.ddpm import DDPM
+from sans.variational_autoencoder.distributions import DiagonalGaussianDistribution
+from sans.latent_diffusion.util import noise_like
+from sans.latent_diffusion.ddim import DDIMSampler
 import os
 
 

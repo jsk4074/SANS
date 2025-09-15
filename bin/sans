@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 import os
-from audioldm import text_to_audio, style_transfer, build_model, save_wave, get_time, round_up_duration, get_duration
+from sans import text_to_audio, style_transfer, build_model, save_wave, get_time, round_up_duration, get_duration
 import argparse
 
 CACHE_DIR = os.getenv(
