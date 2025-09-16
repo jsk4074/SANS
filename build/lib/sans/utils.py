@@ -122,7 +122,7 @@ def default_audioldm_config(model_name="audioldm-s-full"):
         },
         "model": {
             "device": "cuda",
-            "target": "audioldm.pipline.LatentDiffusion",
+            "target": "sans.pipline.LatentDiffusion",
             "params": {
                 "base_learning_rate": 5e-06,
                 "linear_start": 0.0015,
@@ -140,7 +140,7 @@ def default_audioldm_config(model_name="audioldm-s-full"):
                 "monitor": "val/loss_simple_ema",
                 "scale_by_std": True,
                 "unet_config": {
-                    "target": "audioldm.latent_diffusion.openaimodel.UNetModel",
+                    "target": "sans.latent_diffusion.openaimodel.UNetModel",
                     "params": {
                         "image_size": 64,
                         "extra_film_condition_dim": 512,
@@ -157,7 +157,7 @@ def default_audioldm_config(model_name="audioldm-s-full"):
                 },
                 "first_stage_config": {
                     "base_learning_rate": 4.5e-05,
-                    "target": "audioldm.variational_autoencoder.autoencoder.AutoencoderKL",
+                    "target": "sans.variational_autoencoder.autoencoder.AutoencoderKL",
                     "params": {
                         "monitor": "val/rec_loss",
                         "image_key": "fbank",
@@ -180,7 +180,7 @@ def default_audioldm_config(model_name="audioldm-s-full"):
                     },
                 },
                 "cond_stage_config": {
-                    "target": "audioldm.clap.encoders.CLAPAudioEmbeddingClassifierFreev2",
+                    "target": "sans.clap.encoders.CLAPAudioEmbeddingClassifierFreev2",
                     "params": {
                         "key": "waveform",
                         "sampling_rate": 16000,

@@ -138,7 +138,7 @@ setup(
     # },
     install_requires=REQUIRED,
     extras_require=EXTRAS,
-    packages=find_packages(include=("sans", "sans.*", "audioldm", "audioldm.*")),
+    packages=find_packages(),
     # package_data={'bpe': ['audioldm/clap/open_clip/bpe_simple_vocab_16e6.txt.gz']},
     include_package_data=True,
     license="MIT",

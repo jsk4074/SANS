@@ -216,7 +216,7 @@ with iface:
                 </h1>
               </div>
               <p style="margin-bottom: 10px; font-size: 94%">
-                <a href="https://arxiv.org/abs/2301.12503">[Paper]</a>  <a href="https://audioldm.github.io/">[Project page]</a>
+                <a href="https://arxiv.org/abs/2301.12503">[Paper]</a>  <a href="https://sans.github.io/">[Project page]</a>
               </p>
             </div>
         """
