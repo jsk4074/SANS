@@ -1,33 +1,77 @@
+Metadata-Version: 2.1
+Name: sans
+Version: 0.1.2
+Summary: This package is for ASD.
+Home-page: https://github.com/jsk4074/SANS
+Author: JeongSik Kim
+Author-email: 2343783@donga.ac.kr
+License: MIT
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Programming Language :: Python :: Implementation :: PyPy
+Requires-Python: >=3.8.0
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: torch>=1.13.0
+Requires-Dist: torchaudio>=0.13.0
+Requires-Dist: torchvision>=0.14.0
+Requires-Dist: tqdm
+Requires-Dist: gradio
+Requires-Dist: pyyaml
+Requires-Dist: einops
+Requires-Dist: chardet
+Requires-Dist: numpy>=1.24.0
+Requires-Dist: soundfile
+Requires-Dist: librosa>=0.10.0
+Requires-Dist: scipy
+Requires-Dist: pandas
+Requires-Dist: torchlibrosa>=0.0.9
+Requires-Dist: transformers>=4.29.0
+Requires-Dist: progressbar
+Requires-Dist: ftfy
+
+
 # :sound: Audio Generation with AudioLDM (ICML 2023)
 
-[![arXiv](https://img.shields.io/badge/arXiv-2301.12503-brightgreen.svg?style=flat-square)](https://arxiv.org/abs/2301.12503)  [![githubio](https://img.shields.io/badge/GitHub.io-Audio_Samples-blue?logo=Github&style=flat-square)](https://audioldm.github.io/) [![Replicate](https://replicate.com/jagilley/audio-ldm/badge)](https://replicate.com/jagilley/audio-ldm)
+[![arXiv](https://img.shields.io/badge/arXiv-2301.12503-brightgreen.svg?style=flat-square)](https://arxiv.org/abs/2301.12503)  [![githubio](https://img.shields.io/badge/GitHub.io-Audio_Samples-blue?logo=Github&style=flat-square)](https://audioldm.github.io/)  [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/haoheliu/audioldm-text-to-audio-generation)  [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/olaviinha/NeuralTextToAudio/blob/main/AudioLDM_pub.ipynb?force_theme=dark)  [![Replicate](https://replicate.com/jagilley/audio-ldm/badge)](https://replicate.com/jagilley/audio-ldm)
 
 <!-- # [![PyPI version](https://badge.fury.io/py/voicefixer.svg)](https://badge.fury.io/py/voicefixer) -->
 
-A metadata-free pipeline for unsupervised anomalous sound detection (ASD) that (1) synthesizes normal audio with a text-to-audio model and (2) generates controllable anomalous spectrograms via gradient-ascent perturbations in latent space.
-WACV 2026 submission.
+**Generate speech, sound effects, music and beyond.**
+
+This repo currently support: 
+
+- **Text-to-Audio Generation**: Generate audio given text input.
+- **Audio-to-Audio Generation**: Given an audio, generate another audio that contain the same type of sound. 
+- **Text-guided Audio-to-Audio Style Transfer**: Transfer the sound of an audio into another one using the text description.
 
 <hr>
 
-TL;DR
-
-SANS builds an ASD system without fault labels or metadata. We:
-
-adapt a pretrained text-to-audio model (Tango) with LoRA to synthesize diverse normal sounds from automatically generated prompts;
-
-train a reconstruction model on those normals;
-
-create anomalous examples by gradient-ascent in the encoder’s latent space with truncated projection;
-
-convert ascent masks into realistic spectrogram anomalies (Perlin-guided, cut-paste, etc.);
-
-train a lightweight discriminator on (normal vs. synthetic-anomaly) embeddings;
-
-perform inference with the frozen encoder + discriminator.
+## Important tricks to make your generated audio sound better
+1. Try to provide more hints to AudioLDM, such as using more adjectives to describe your sound (e.g., clearly, high quality) or make your target more specific (e.g., "water stream in a forest" instead of "stream"). This can make sure AudioLDM understand what you want. 
+2. Try to use different random seeds, which can affect the generation quality significantly sometimes.
+3. It's best to use general terms like 'man' or 'woman' instead of specific names for individuals or abstract objects that humans may not be familiar with.
 
 # Change Log
 
-**2025-sep-16**: init commit.
+**2023-04-10**: Try to finetune AudioLDM with MusicCaps and AudioCaps datasets. Add three more checkpoints, including audioldm-m-text-ft, audioldm-s-text-ft, and audioldm-m-full.
+
+**2023-03-04**: Add two more checkpoints, one is small model with more training steps, another is a large model. Add model selection in the Gradio APP.
+
+**2023-02-24**: Add audio-to-audio generation. Add test cases. Add a pipeline (python function) for audio super-resolution and inpainting.
+
+**2023-02-15**: Add audio style transfer. Add more options on generation.
+
+## Web APP
+
+The web APP currently only support Text-to-Audio generation. For full functionality please refer to the [Commandline Usage](https://github.com/haoheliu/AudioLDM#commandline-usage).
 
 1. Prepare running environment
 ```shell
@@ -152,9 +196,17 @@ prompt = "Techno music with a strong, upbeat tempo and high melodic riffs"
 audio = pipe(prompt, num_inference_steps=10, audio_length_in_s=5.0).audios[0]
 ```
 
+# Web Demo
+
+Integrated into [Hugging Face Spaces 🤗](https://huggingface.co/spaces) using [Gradio](https://github.com/gradio-app/gradio). Try out the Web Demo [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/haoheliu/audioldm-text-to-audio-generation)
+
+# TuneFlow Demo
+
+Try out AudioLDM as a [TuneFlow](https://tuneflow.com) plugin [![TuneFlow x AudioLDM](https://img.shields.io/badge/TuneFlow-AudioLDM-%23C563E6%20)](https://github.com/tuneflow/AudioLDM). See how it can work in a real DAW (Digital Audio Workstation). 
+
 # TODO
 
-<!-- [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/haoheliuP)
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/haoheliuP)
 
 - [x] Update the checkpoint with more training steps.
 - [x] Update the checkpoint with more parameters (audioldm-l).
@@ -166,26 +218,26 @@ audio = pipe(prompt, num_inference_steps=10, audio_length_in_s=5.0).audios[0]
 - [x] Add text-guided style transfer
 - [x] Add audio-to-audio generation
 - [x] Add audio super-resolution
-- [x] Add audio inpainting -->
+- [x] Add audio inpainting
 
 ## Cite this work
 
 If you found this tool useful, please consider citing
 ```bibtex
-<!-- @article{#################,
+@article{liu2023audioldm,
   title={{AudioLDM}: Text-to-Audio Generation with Latent Diffusion Models},
   author={Liu, Haohe and Chen, Zehua and Yuan, Yi and Mei, Xinhao and Liu, Xubo and Mandic, Danilo and Wang, Wenwu and Plumbley, Mark D},
   journal={Proceedings of the International Conference on Machine Learning},
   year={2023},
   pages={21450-21474}
-} -->
+}
 ```
 
-<!-- # Hardware requirement
+# Hardware requirement
 - GPU with 8GB of dedicated VRAM
-- A system with a 64-bit operating system (Windows 7, 8.1 or 10, Ubuntu 16.04 or later, or macOS 10.13 or later) 16GB or more of system RAM -->
+- A system with a 64-bit operating system (Windows 7, 8.1 or 10, Ubuntu 16.04 or later, or macOS 10.13 or later) 16GB or more of system RAM
 
-<!-- ## Reference
+## Reference
 Part of the code is borrowed from the following repos. We would like to thank the authors of these repos for their contribution. 
 
 > https://github.com/LAION-AI/CLAP
@@ -194,9 +246,9 @@ Part of the code is borrowed from the following repos. We would like to thank th
 
 > https://github.com/v-iashin/SpecVQGAN 
 
-> https://github.com/toshas/torch-fidelity -->
+> https://github.com/toshas/torch-fidelity
 
 
-<!-- We build the model with data from AudioSet, Freesound and BBC Sound Effect library. We share this demo based on the UK copyright exception of data for academic research.  -->
+We build the model with data from AudioSet, Freesound and BBC Sound Effect library. We share this demo based on the UK copyright exception of data for academic research. 
 
 <!-- This code repo is strictly for research demo purpose only. For commercial use please contact us. -->
