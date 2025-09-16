@@ -29,52 +29,26 @@ perform inference with the frozen encoder + discriminator.
 
 **2025-sep-16**: init commit.
 
-1. Prepare running environment
+## Prepare running environment
 ```shell
-conda create -n audioldm python=3.8; conda activate audioldm
-pip3 install git+https://github.com/haoheliu/AudioLDM.git
-git clone https://github.com/haoheliu/AudioLDM; cd AudioLDM
+conda create -n sans python=3.8; conda activate sans
+pip3 install git+https://github.com/jsk4074/SANS.git
+git clone https://github.com/jsk4074/SANS; cd SANS
 ```
-2. Start the web application (powered by Gradio)
-```shell
-python3 app.py
-```
-3. A link will be printed out. Click the link to open the browser and play.
 
 ## Commandline Usage
 Prepare running environment
 ```shell
 # Optional
-conda create -n audioldm python=3.8; conda activate audioldm
-# Install AudioLDM
-pip3 install git+https://github.com/haoheliu/AudioLDM.git
-```
-
-:star2: **Text-to-Audio Generation**: generate an audio guided by a text
-```shell
-# The default --mode is "generation"
-audioldm -t "A hammer is hitting a wooden surface" 
-# Result will be saved in "./output/generation"
+conda create -n sans python=3.8; conda activate sans
+# Install SANS
+pip3 install git+https://github.com/jsk4074/SANS.git
 ```
 
 :star2: **Audio-to-Audio Generation**: generate an audio guided by an audio (output will have similar audio events as the input audio file).
 ```shell
-audioldm --file_path trumpet.wav
+sans --file_path trumpet.wav
 # Result will be saved in "./output/generation_audio_to_audio/trumpet"
-```
-
-:star2: **Text-guided Audio-to-Audio Style Transfer**
-```shell
-# Test run
-# --file_path is the original audio file for transfer
-# -t is the text AudioLDM uses for transfer. 
-# Please make sure that --file_path exist
-audioldm --mode "transfer" --file_path trumpet.wav -t "Children Singing" 
-# Result will be saved in "./output/transfer/trumpet"
-
-# Tune the value of --transfer_strength is important!
-# --transfer_strength: A value between 0 and 1. 0 means original audio without transfer, 1 means completely transfer to the audio indicated by text
-audioldm --mode "transfer" --file_path trumpet.wav -t "Children Singing" --transfer_strength 0.25
 ```
 
 :gear: How to choose between different model checkpoints?
@@ -95,7 +69,7 @@ audioldm --model_name audioldm-s-full
 :grey_question: For more options on guidance scale, batchsize, seed, ddim steps, etc., please run
 ```shell
 audioldm -h
-```
+
 ```console
 usage: audioldm [-h] [--mode {generation,transfer}] [-t TEXT] [-f FILE_PATH] [--transfer_strength TRANSFER_STRENGTH] [-s SAVE_PATH] [--model_name {audioldm-s-full,audioldm-l-full,audioldm-s-full-v2}] [-ckpt CKPT_PATH]
                 [-b BATCHSIZE] [--ddim_steps DDIM_STEPS] [-gs GUIDANCE_SCALE] [-dur DURATION] [-n N_CANDIDATE_GEN_PER_TEXT] [--seed SEED]
@@ -130,16 +104,7 @@ optional arguments:
 
 For the evaluation of audio generative model, please refer to [audioldm_eval](https://github.com/haoheliu/audioldm_eval).
 
-# Hugging Face 🧨 Diffusers
 
-AudioLDM is available in the Hugging Face [🧨 Diffusers](https://github.com/huggingface/diffusers) library from v0.15.0 onwards. The official checkpoints can be found on the [Hugging Face Hub](https://huggingface.co/cvssp), alongside [documentation](https://huggingface.co/docs/diffusers/main/en/api/pipelines/audioldm) and [examples scripts](https://huggingface.co/docs/diffusers/main/en/api/pipelines/audioldm).
-
-To install Diffusers and Transformers, run:
-```bash
-pip install --upgrade diffusers transformers
-```
-
-You can then load pre-trained weights into the [AudioLDM pipeline](https://huggingface.co/docs/diffusers/main/en/api/pipelines/audioldm) and generate text-conditional audio outputs:
 ```python
 from diffusers import AudioLDMPipeline
 import torch

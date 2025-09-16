@@ -156,6 +156,7 @@ def style_transfer(
     guidance_scale=2.5,
     ddim_steps=200,
     config=None,
+    output_type=None,
 ):
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
