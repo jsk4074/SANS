@@ -26,12 +26,12 @@ from setuptools import find_packages, setup, Command
 
 # Package meta-data.
 NAME = "sans"
-DESCRIPTION = "This package is for ASD."
+DESCRIPTION = "This package is for SANS."
 URL = "https://github.com/jsk4074/SANS"
 EMAIL = "2343783@donga.ac.kr"
 AUTHOR = "JeongSik Kim"
 REQUIRES_PYTHON = ">=3.8.0"
-VERSION = "0.1.2"
+VERSION = "0.1.3"
 
 # What packages are required for this module to be executed?
 REQUIRED = [
@@ -138,7 +138,7 @@ setup(
     # },
     install_requires=REQUIRED,
     extras_require=EXTRAS,
-    packages=find_packages(),
+    packages=find_packages(include=("sans", "sans.*", "audioldm", "audioldm.*")),
     # package_data={'bpe': ['audioldm/clap/open_clip/bpe_simple_vocab_16e6.txt.gz']},
     include_package_data=True,
     license="MIT",
