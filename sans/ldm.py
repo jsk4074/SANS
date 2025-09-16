@@ -717,8 +717,8 @@ class LatentDiffusion(DDPM):
                     waveform = waveform[best_index]
                     # print("Similarity between generated audio and text", similarity)
                     # print("Choose the following indexes:", best_index)
-
-        return waveform
+        return mel
+        # return waveform
 
     @torch.no_grad()
     def generate_sample_masked(
@@ -814,5 +814,6 @@ class LatentDiffusion(DDPM):
                     waveform = waveform[best_index]
                     # print("Similarity between generated audio and text", similarity)
                     # print("Choose the following indexes:", best_index)
-
-        return waveform
+                    
+        return mel
+        # return waveform
