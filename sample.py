@@ -16,8 +16,60 @@ from sans.objectives import band_energy_objective
 from sans.ascent_ckpt import encode_audio_cond, generate_with_audio_cond
 
 
+# ---------- plotting helpers (fixes inverted axes) ----------------------------
+
+def _to_numpy_2d_ft(x: torch.Tensor | np.ndarray) -> np.ndarray:
+    """
+    Normalize any spectrogram-like input to a 2D array shaped [F, T].
+
+    Accepts:
+      - torch or numpy
+      - [B, C, F, T]
+      - [B, C, T, F]
+      - [B, F, T]
+      - [B, T, F]
+      - [F, T]
+      - [T, F]
+
+    Heuristic:
+      If after squeezing to 2D we get [M, N] and M < N, we assume it's [T, F]
+      and transpose to [F, T]. Otherwise we keep as-is.
+    """
+    # -> numpy
+    if isinstance(x, torch.Tensor):
+        x = x.detach().cpu().numpy()
+
+    arr = np.array(x)
+
+    # squeeze batch/channel if present
+    # cases: [B,C,F,T], [B,C,T,F], [B,F,T], [B,T,F]
+    if arr.ndim == 4:
+        # take first batch & channel
+        arr = arr[0, 0]
+    elif arr.ndim == 3:
+        # take first batch
+        arr = arr[0]
+
+    # now arr is either [F,T] or [T,F]
+    if arr.ndim != 2:
+        # last resort: flatten to something plottable
+        if arr.ndim == 1:
+            arr = arr[None, :]
+        else:
+            # pick the last 2 axes
+            arr = arr.reshape(arr.shape[-2], arr.shape[-1])
+
+    # ensure [F, T]
+    F, T = arr.shape
+    # Heuristic: if rows < cols, it's likely [T, F] -> transpose
+    if F < T:
+        arr = arr.T  # -> [F, T]
+
+    return arr
+
+
 def save_mel_image(
-    mel: torch.Tensor,
+    mel_like: torch.Tensor | np.ndarray,
     path: str = "mel.png",
     sr: int = 16000,
     hop_length: int = 160,
@@ -25,24 +77,19 @@ def save_mel_image(
     vmax: float = None,
     title: str = None,
 ):
+    """
+    Save a spectrogram image with **frequency on Y** and **time on X**.
+    Handles all common shapes and fixes inverted axes automatically.
+    """
     try:
-        if isinstance(mel, (list, tuple)):
-            mel = mel[0]
-        if isinstance(mel, torch.Tensor):
-            mel = mel.detach().cpu()
-        img = np.array(mel)
+        img = _to_numpy_2d_ft(mel_like)  # [F, T]
 
-        # Accept [B,1,F,T] / [B,F,T] / [F,T]
-        if img.ndim == 4:
-            img = img[0, 0]
-        if img.ndim == 3:
-            img = img[0]
-
+        # robust display scaling
         if vmin is None or vmax is None:
             vmin = float(np.percentile(img, 2.0))
             vmax = float(np.percentile(img, 98.0))
 
-        n_frames = img.shape[1] if img.ndim == 2 else 0
+        n_frames = img.shape[1]
         plt.figure(figsize=(10, 3))
         plt.imshow(img, aspect="auto", origin="lower", vmin=vmin, vmax=vmax)
         cbar = plt.colorbar()
@@ -53,7 +100,8 @@ def save_mel_image(
             plt.title(title)
         if n_frames > 0:
             xticks = np.linspace(0, n_frames - 1, 6)
-            plt.xticks(xticks, [f"{t:.2f}" for t in (xticks * hop_length / sr)])
+            times = xticks * (hop_length / sr)
+            plt.xticks(xticks, [f"{t:.2f}" for t in times])
         plt.tight_layout()
         plt.savefig(path, dpi=150)
     except Exception as e:
@@ -61,6 +109,8 @@ def save_mel_image(
     finally:
         plt.close()
 
+
+# ---------- main --------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="CKPT-only ascent synthesis (robust, no HF)")
@@ -101,13 +151,13 @@ def main():
     eff_duration = min(args.duration, ref_len_s)
 
     print("Encoding audio condition (with graceful fallback)...")
-    cond0 = encode_audio_cond(ldm, wave, sr=args.sr)  # never raises; returns Tensor
+    cond0 = encode_audio_cond(ldm, wave, sr=args.sr)  # returns Tensor
 
-    # Objective (accepts both waveform and mel; will skip re-mel if already mel)
+    # Objective (works for waveform or mel-like tensors)
     to_mel = WaveToMel(sr=args.sr, hop=args.hop, n_mels=args.n_mels)
     obj = band_energy_objective(to_mel, band=(args.band_lo, args.band_hi))
 
-    # Parameter to optimize (always a Tensor)
+    # Parameter to optimize
     if not isinstance(cond0, torch.Tensor):
         cond0 = torch.zeros((1, 768), dtype=torch.float32, device=device)
     e = torch.nn.Parameter(cond0.clone().detach().requires_grad_(True))
@@ -117,20 +167,19 @@ def main():
     for t in range(args.ascent_steps):
         opt.zero_grad(set_to_none=True)
 
-        # Generate (will return waveform if possible; else may return mel)
+        # Generate (waveform preferred; may return mel-like)
         syn = generate_with_audio_cond(
             ldm,
             e,
             steps=args.inner_steps,
             guidance_scale=args.guidance,
-            duration_s=eff_duration,   # use clamped duration
+            duration_s=eff_duration,
             seed=args.seed,
             ref_path=args.ref,
             sr=args.sr,
         )
         last_out = syn
 
-        # Objective works both if syn is waveform [B,T] or mel [B,F,T]/[B,1,F,T]
         score = obj(syn if syn.ndim > 1 else syn.unsqueeze(0))
         if score.ndim > 0:
             score = score.mean()
@@ -141,7 +190,7 @@ def main():
         torch.nn.utils.clip_grad_norm_([e], 5.0)
         opt.step()
 
-        # L2-ball projection around cond0
+        # L2-ball projection
         with torch.no_grad():
             d = e - cond0
             n = d.norm(p=2, dim=-1, keepdim=True).clamp_min(1e-12)
@@ -151,13 +200,12 @@ def main():
         if (t + 1) % 5 == 0:
             print(f"[{t+1}/{args.ascent_steps}] score={float(score):.6f}  loss={float(loss):.6f}")
 
-    # Visualize original & ascent
+    # Visualize
     try:
         mel_ref = librosa.feature.melspectrogram(
             y=np.array(ref_wav), sr=args.sr, hop_length=args.hop, n_mels=args.n_mels
         )
-        mel_ref = torch.tensor(mel_ref)
-        save_mel_image(mel_ref,    "original.png",   sr=args.sr, hop_length=args.hop, title="Original (ref)")
+        save_mel_image(mel_ref, "original.png", sr=args.sr, hop_length=args.hop, title="Original (ref)")
     except Exception as e_vis:
         print(f"[viz:original] non-fatal error: {e_vis}", file=sys.stderr)
 
@@ -169,7 +217,7 @@ def main():
                 # waveform [B,T] (likely): convert to mel
                 mel_ascent = to_mel(out_for_viz)
             else:
-                # already a mel-like tensor
+                # already mel-like
                 mel_ascent = out_for_viz
         else:
             mel_ascent = to_mel(torch.tensor(out_for_viz, dtype=torch.float32).unsqueeze(0))
