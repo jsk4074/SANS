@@ -29,9 +29,8 @@ def make_ae_recon_objective(ae_model, to_mel_fn):
     return _obj
 
 def band_energy_objective(to_mel, band = (64, 127), device = None):
-
     def _obj(wave):
-        if wave.device != next(to_mel.parameters(), torch.empty(device = wave.device)).device:
+        if wave.device != next(to_mel.parameters(), torch.empty(device = wave.device, size = band)).device:
             to_mel.to(wave.device)
         mel = to_mel(wave)
         if mel.ndim == 4:
