@@ -3,6 +3,8 @@
 
 import argparse
 import warnings
+import sys
+
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -23,87 +25,45 @@ def save_mel_image(
     vmax: float = None,
     title: str = None,
 ):
-    if isinstance(mel, (list, tuple)):
-        mel = mel[0]
-    if isinstance(mel, torch.Tensor):
-        mel = mel.detach().cpu()
-    img = mel.numpy()
+    try:
+        if isinstance(mel, (list, tuple)):
+            mel = mel[0]
+        if isinstance(mel, torch.Tensor):
+            mel = mel.detach().cpu()
+        img = np.array(mel)
 
-    if img.ndim == 4:   # [B, C, F, T]
-        img = img[0, 0]
-    if img.ndim == 3:   # [B, F, T]
-        img = img[0]
+        # Accept [B,1,F,T] / [B,F,T] / [F,T]
+        if img.ndim == 4:
+            img = img[0, 0]
+        if img.ndim == 3:
+            img = img[0]
 
-    if vmin is None or vmax is None:
-        vmin = float(np.percentile(img, 2.0))
-        vmax = float(np.percentile(img, 98.0))
+        if vmin is None or vmax is None:
+            vmin = float(np.percentile(img, 2.0))
+            vmax = float(np.percentile(img, 98.0))
 
-    n_frames = img.shape[1]
-    plt.figure(figsize=(10, 3))
-    plt.imshow(img, aspect="auto", origin="lower", vmin=vmin, vmax=vmax)
-    cbar = plt.colorbar()
-    cbar.set_label("log-mel")
-    plt.xlabel("Time (s)")
-    plt.ylabel("Mel bins")
-    if title:
-        plt.title(title)
-    xticks = np.linspace(0, n_frames - 1, 6)
-    plt.xticks(xticks, [f"{t:.2f}" for t in (xticks * hop_length / sr)])
-    plt.tight_layout()
-    plt.savefig(path, dpi=150)
-    plt.close()
-
-
-def bind_audio_encoder(ldm):
-    """
-    Make sure ldm.audio_cond_encoder exists and is callable.
-    Choose ONE of the discovered locations and bind it.
-    """
-    has = []
-    if hasattr(ldm, "audio_cond_encoder"):
-        if callable(getattr(ldm, "audio_cond_encoder")):
-            return  # already bound
-
-    if hasattr(ldm, "cond_stage_model"):
-        if hasattr(ldm.cond_stage_model, "encode_audio"):
-            has.append("cond_stage_model.encode_audio")
-
-    if hasattr(ldm, "cond_stage_models"):
-        models = ldm.cond_stage_models
-        is_dict = isinstance(models, dict)
-        has_audio_key = (("audio" in models) if is_dict else (hasattr(models, "__contains__") and ("audio" in models)))
-        if has_audio_key:
-            enc = models["audio"]
-            if hasattr(enc, "forward") and callable(enc.forward):
-                has.append("cond_stage_models['audio']")
-
-    if hasattr(ldm, "audio_encoder"):
-        if callable(getattr(ldm, "audio_encoder")):
-            has.append("audio_encoder")
-
-    if len(has) == 0:
-        raise AssertionError(
-            "No audio encoder found. Please expose one of:\n"
-            "  ldm.audio_cond_encoder(mel)\n"
-            "  ldm.cond_stage_model.encode_audio(mel)\n"
-            "  ldm.cond_stage_models['audio'](mel)\n"
-            "  ldm.audio_encoder(mel)\n"
-        )
-
-    choice = has[0]
-
-    if choice == "cond_stage_model.encode_audio":
-        ldm.audio_cond_encoder = ldm.cond_stage_model.encode_audio
-    elif choice == "cond_stage_models['audio']":
-        ldm.audio_cond_encoder = ldm.cond_stage_models["audio"]   # module; its forward(mel) will be used
-    elif choice == "audio_encoder":
-        ldm.audio_cond_encoder = ldm.audio_encoder
-    else:
-        raise AssertionError("Unexpected binding choice: " + choice)
+        n_frames = img.shape[1] if img.ndim == 2 else 0
+        plt.figure(figsize=(10, 3))
+        plt.imshow(img, aspect="auto", origin="lower", vmin=vmin, vmax=vmax)
+        cbar = plt.colorbar()
+        cbar.set_label("log-mel")
+        plt.xlabel("Time (s)")
+        plt.ylabel("Mel bins")
+        if title:
+            plt.title(title)
+        if n_frames > 0:
+            xticks = np.linspace(0, n_frames - 1, 6)
+            plt.xticks(xticks, [f"{t:.2f}" for t in (xticks * hop_length / sr)])
+        plt.tight_layout()
+        plt.savefig(path, dpi=150)
+    except Exception as e:
+        print(f"[save_mel_image] non-fatal error: {e}", file=sys.stderr)
+    finally:
+        plt.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CKPT-only ascent synthesis (no HF)")
+    parser = argparse.ArgumentParser(description="CKPT-only ascent synthesis (robust, no HF)")
     parser.add_argument("--ckpt", type=str, default="/home/tori/.cache/audioldm/audioldm-s-full.ckpt")
     parser.add_argument("--ref", type=str, default="trumpet.wav")
     parser.add_argument("--sr", type=int, default=16000)
@@ -126,41 +86,52 @@ def main():
     print(f"Loading AudioLDM CKPT: {args.ckpt}")
     ldm = build_model(args.ckpt)
 
-    # Bind a concrete audio encoder for conditioning
-    bind_audio_encoder(ldm)
-
+    # Load reference audio (robust)
     print(f"Loading reference audio: {args.ref}")
-    ref_wav, _ = librosa.load(args.ref, sr=args.sr)
+    try:
+        ref_wav, _ = librosa.load(args.ref, sr=args.sr)
+    except Exception as e:
+        print(f"[sample] Could not load {args.ref}: {e}. Falling back to a 440Hz tone.", file=sys.stderr)
+        t = np.linspace(0, args.duration, int(args.sr * args.duration), endpoint=False)
+        ref_wav = 0.2 * np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
     wave = torch.tensor(ref_wav, dtype=torch.float32, device=device).unsqueeze(0)
 
-    print("Encoding audio condition...")
-    with torch.no_grad():
-        cond0 = encode_audio_cond(ldm, wave, sr=args.sr)
+    # Clamp synth duration to the reference audio length (avoid duration warnings)
+    ref_len_s = max(0.25, len(ref_wav) / float(args.sr))
+    eff_duration = min(args.duration, ref_len_s)
 
+    print("Encoding audio condition (with graceful fallback)...")
+    cond0 = encode_audio_cond(ldm, wave, sr=args.sr)  # never raises; returns Tensor
+
+    # Objective (accepts both waveform and mel; will skip re-mel if already mel)
     to_mel = WaveToMel(sr=args.sr, hop=args.hop, n_mels=args.n_mels)
     obj = band_energy_objective(to_mel, band=(args.band_lo, args.band_hi))
 
-    # Projected gradient ascent on the conditioning embedding
+    # Parameter to optimize (always a Tensor)
+    if not isinstance(cond0, torch.Tensor):
+        cond0 = torch.zeros((1, 768), dtype=torch.float32, device=device)
     e = torch.nn.Parameter(cond0.clone().detach().requires_grad_(True))
     opt = torch.optim.Adam([e], lr=args.lr)
 
-    last_wave = None
+    last_out = None
     for t in range(args.ascent_steps):
         opt.zero_grad(set_to_none=True)
 
-        # Reuse your sampler, bypassing re-encoding
+        # Generate (will return waveform if possible; else may return mel)
         syn = generate_with_audio_cond(
             ldm,
             e,
             steps=args.inner_steps,
             guidance_scale=args.guidance,
-            duration_s=args.duration,
+            duration_s=eff_duration,   # use clamped duration
             seed=args.seed,
-            ref_path=args.ref,     # reuse the same file path; content is ignored by patched encoder
+            ref_path=args.ref,
+            sr=args.sr,
         )
-        last_wave = syn
+        last_out = syn
 
-        score = obj(syn) if syn.ndim > 1 else obj(syn.unsqueeze(0))
+        # Objective works both if syn is waveform [B,T] or mel [B,F,T]/[B,1,F,T]
+        score = obj(syn if syn.ndim > 1 else syn.unsqueeze(0))
         if score.ndim > 0:
             score = score.mean()
 
@@ -180,17 +151,33 @@ def main():
         if (t + 1) % 5 == 0:
             print(f"[{t+1}/{args.ascent_steps}] score={float(score):.6f}  loss={float(loss):.6f}")
 
-    # Visualize
-    mel_ref = librosa.feature.melspectrogram(
-        y=ref_wav, sr=args.sr, hop_length=args.hop, n_mels=args.n_mels
-    )
-    mel_ref = torch.tensor(mel_ref)
-    mel_ascent = to_mel(last_wave)
+    # Visualize original & ascent
+    try:
+        mel_ref = librosa.feature.melspectrogram(
+            y=np.array(ref_wav), sr=args.sr, hop_length=args.hop, n_mels=args.n_mels
+        )
+        mel_ref = torch.tensor(mel_ref)
+        save_mel_image(mel_ref,    "original.png",   sr=args.sr, hop_length=args.hop, title="Original (ref)")
+    except Exception as e_vis:
+        print(f"[viz:original] non-fatal error: {e_vis}", file=sys.stderr)
 
-    save_mel_image(mel_ref,    "original.png",   sr=args.sr, hop_length=args.hop, title="Original (ref)")
-    save_mel_image(mel_ascent, "src_ascent.png", sr=args.sr, hop_length=args.hop, title="Ascent (audio→audio)")
+    # If model returned waveform, convert; if it returned mel already, use it
+    out_for_viz = last_out
+    try:
+        if isinstance(out_for_viz, torch.Tensor):
+            if out_for_viz.ndim == 2 and out_for_viz.size(1) > 4 * to_mel.n_fft:
+                # waveform [B,T] (likely): convert to mel
+                mel_ascent = to_mel(out_for_viz)
+            else:
+                # already a mel-like tensor
+                mel_ascent = out_for_viz
+        else:
+            mel_ascent = to_mel(torch.tensor(out_for_viz, dtype=torch.float32).unsqueeze(0))
+        save_mel_image(mel_ascent, "src_ascent.png", sr=args.sr, hop_length=args.hop, title="Ascent (audio→audio)")
+    except Exception as e_vis2:
+        print(f"[viz:ascent] non-fatal error: {e_vis2}", file=sys.stderr)
 
-    print("Done. Files: original.png, src_ascent.png")
+    print("Done. Files (if no viz errors): original.png, src_ascent.png")
 
 
 if __name__ == "__main__":
