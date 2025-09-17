@@ -19,6 +19,8 @@ Classifier: Programming Language :: Python :: Implementation :: PyPy
 Requires-Python: >=3.8.0
 Description-Content-Type: text/markdown
 License-File: LICENSE
+Requires-Dist: matplotlib
+Requires-Dist: diffusers
 Requires-Dist: tqdm
 Requires-Dist: gradio
 Requires-Dist: pyyaml

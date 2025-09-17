@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 import os
-from sans import text_to_audio, style_transfer, build_model, save_wave, get_time, round_up_duration, get_duration
+from sans import style_transfer, build_model, save_wave, get_time, round_up_duration, get_duration
 import argparse
 
 CACHE_DIR = os.getenv(
@@ -150,21 +150,8 @@ n_candidate_gen_per_text = args.n_candidate_gen_per_text
 
 os.makedirs(save_path, exist_ok=True)
 audioldm = build_model(model_name=args.model_name)
-
-if(args.mode == "generation"):
-    waveform = text_to_audio(
-        audioldm,
-        text,
-        args.file_path,
-        random_seed,
-        duration=duration,
-        guidance_scale=guidance_scale,
-        ddim_steps=args.ddim_steps,
-        n_candidate_gen_per_text=n_candidate_gen_per_text,
-        batchsize=args.batchsize,
-    )
     
-elif(args.mode == "transfer"):
+if(args.mode == "transfer"):
     assert args.file_path is not None
     assert os.path.exists(args.file_path), "The original audio file \'%s\' for style transfer does not exist." % args.file_path
     waveform = style_transfer(

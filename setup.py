@@ -39,6 +39,7 @@ REQUIRED = [
     # "torchaudio",
     # "torchvision",
     "matplotlib",
+    "diffusers",
     "tqdm",
     "gradio",
     "pyyaml",

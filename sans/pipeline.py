@@ -211,3 +211,63 @@ def style_transfer(
                 )
     return mel
     # return waveform
+
+# --- New: build a Diffusers AudioLDM pipeline ---
+def build_diffusers(repo_id: str = "cvssp/audioldm-s-full-v2",
+                    device: str = None,
+                    dtype=None):
+    import torch
+    from diffusers import AudioLDMPipeline
+    if dtype is None:
+        dtype = torch.float16 if torch.cuda.is_available() else torch.float32
+    pipe = AudioLDMPipeline.from_pretrained(repo_id, torch_dtype=dtype)
+    return pipe.to(device or ("cuda" if torch.cuda.is_available() else "cpu"))
+
+def ascent_transfer(
+    ldm_or_pipe,            
+    text: str,
+    *,
+    objective_fn,           
+    ascent_steps: int = 25,
+    inner_ddim_steps: int = 12,
+    guidance_scale: float = 2.5,
+    duration: float = 5.0,
+    tau: float = 2.0,
+    lr: float = 1e-2,
+    seed: int = 1234,
+    output_type: str = "mel",
+    to_mel=None,            
+):
+    import torch
+    from .ascent import DiffusersAudioLDMWrapper, optimize_prompt_embeds
+
+    assert hasattr(ldm_or_pipe, "tokenizer"), \
+        "ascent_transfer requires a Diffusers AudioLDM pipeline. Use build_diffusers(...)."
+
+    pipew = DiffusersAudioLDMWrapper(ldm_or_pipe)
+    with torch.no_grad():
+        e0 = pipew.encode_prompt(text or "")
+
+    e_star, wave = optimize_prompt_embeds(
+        pipew,
+        init_embeds=e0,
+        objective_fn=objective_fn,
+        steps=ascent_steps,
+        inner_steps=inner_ddim_steps,
+        lr=lr,
+        l2_anchor=1e-3,
+        tau=tau,
+        guidance_scale=guidance_scale,
+        audio_length_in_s=duration,
+        seed=seed,
+    )
+
+    if output_type == "waveform":
+        return wave
+    if to_mel is not None:
+        return to_mel(wave)
+    try:
+        from .audio_utils import WaveToMel
+        return WaveToMel()(wave.to(wave.device))
+    except Exception:
+        return wave
