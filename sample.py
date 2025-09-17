@@ -1,159 +1,146 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-import argparse
-import warnings
-import sys
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
-import librosa
-
+import argparse, warnings, sys, numpy as np, matplotlib.pyplot as plt, torch, librosa
 from sans import build_model
 from sans.audio_utils import WaveToMel
 from sans.objectives import band_energy_objective
 from sans.ascent_ckpt import encode_audio_cond, generate_with_audio_cond
 
+from tqdm import tqdm
 
 # ---------------- audio normalization ----------------
-
 def rms_dbfs(x: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
-    """
-    x: [B, T] waveform in [-1,1]
-    returns per-item RMS dBFS [B, 1]
-    """
-    if x.ndim == 1:
-        x = x.unsqueeze(0)
+    if x.ndim == 1: x = x.unsqueeze(0)
     rms = torch.sqrt((x ** 2).mean(dim=-1, keepdim=True) + eps)
     return 20.0 * torch.log10(rms.clamp_min(eps))
 
 def normalize_rms(x: torch.Tensor, target_dbfs: float = -20.0, peak_clip: float = 0.999) -> torch.Tensor:
-    """
-    Scale each item to target RMS in dBFS. Clips to +/-peak_clip to avoid overflow.
-    """
-    if x.ndim == 1:
-        x = x.unsqueeze(0)
-    cur = rms_dbfs(x)                      # [B,1]
-    gain_db = target_dbfs - cur            # [B,1]
-    gain = (10.0 ** (gain_db / 20.0))      # [B,1]
+    if x.ndim == 1: x = x.unsqueeze(0)
+    gain = 10.0 ** ((target_dbfs - rms_dbfs(x)) / 20.0)
     y = x * gain
     return y.clamp_(-peak_clip, peak_clip)
 
-# ---------------- plotting: X=mel bins, Y=time ----------------
-
-def _to_numpy_2d_ft(x: torch.Tensor | np.ndarray, n_mels_hint: int = 128) -> np.ndarray:
+# ---------------- shape utils: ALWAYS return [B,1,F,T] ----------------
+def ensure_mel_b1ft(x: torch.Tensor) -> torch.Tensor:
     """
-    Normalize to a 2D array [F, T]. Uses n_mels_hint to decide which axis is F.
-    Accepts shapes like [B,C,F,T], [B,F,T], [F,T], [T,F], etc.
+    Accepts waveform [B,T] or mel-like [B,1,F,T]/[B,F,T]/[F,T]/[B,T,F].
+    Returns mel [B,1,F,T]. If input is waveform, caller should run to_mel() first.
     """
-    if isinstance(x, torch.Tensor):
-        x = x.detach().cpu().numpy()
-    a = np.array(x)
+    if not isinstance(x, torch.Tensor):
+        x = torch.tensor(x, dtype=torch.float32)
+    t = x
+    if t.ndim == 4:                    # [B,1,F,T] or [B,C,F,T]
+        if t.size(1) != 1:
+            t = t.mean(dim=1, keepdim=True)
+        return t
+    if t.ndim == 3:                    # [B,F,T] or [B,T,F]
+        # decide if middle is F or T by which is smaller (F ~ 64..512 typical)
+        B, A, B2 = t.shape
+        if A <= B2:    # [B,F,T]
+            return t.unsqueeze(1)
+        else:          # [B,T,F] -> [B,1,F,T]
+            return t.transpose(1, 2).unsqueeze(1)
+    if t.ndim == 2:                    # [F,T] or [T,F]
+        F, T = t.shape
+        if F <= T:    # [F,T]
+            return t.unsqueeze(0).unsqueeze(0)
+        else:         # [T,F]
+            return t.t().unsqueeze(0).unsqueeze(0)
+    if t.ndim == 1:                    # [T] -> fake batch/ch
+        return t.unsqueeze(0).unsqueeze(0)
+    raise RuntimeError(f"Unsupported tensor shape for ensure_mel_b1ft: {tuple(t.shape)}")
 
-    if a.ndim == 4:   # [B,C,F,T] or [B,C,T,F]
-        a = a[0, 0]
-    elif a.ndim == 3: # [B,F,T] or [B,T,F]
-        a = a[0]
-    elif a.ndim < 2:
-        # last resort
-        a = a.reshape(1, -1)
+# ---------------- plotting with explicit axes ----------------
+def plot_mel_axes(
+        mel_b1ft: torch.Tensor, 
+        *, 
+        path: str, 
+        sr: int, 
+        hop: int,
+        axes: str = "time-x", 
+        title: str = None, 
+        vmin=None, 
+        vmax=None
+    ):
+    """
+    mel_b1ft: [B,1,F,T]
+    axes: "time-x"  -> X=time(s),  Y=mel bins
+          "time-y"  -> X=mel bins, Y=time(s)
+    """
+    m = mel_b1ft.detach().cpu().numpy()
+    if m.ndim != 4 or m.shape[1] != 1:
+        m = ensure_mel_b1ft(torch.tensor(m)).numpy()
+    img = m[0, 0]  # [F,T]
 
-    if a.ndim != 2:
-        a = a.reshape(a.shape[-2], a.shape[-1])  # take last two dims
+    F, T = img.shape
+    if vmin is None or vmax is None:
+        vmin = float(np.percentile(img, 2.0)); vmax = float(np.percentile(img, 98.0))
+    t_max = (T - 1) * (hop / sr)
 
-    # Decide which axis is F by closeness to n_mels_hint
-    F0, F1 = a.shape[0], a.shape[1]
-    if abs(F0 - n_mels_hint) <= abs(F1 - n_mels_hint):
-        ft = a  # [F,T] already
+    plt.figure(figsize=(10, 4))
+    if axes == "time-x":
+        # X: time(s), Y: mel bins
+        extent = [0.0, t_max, 0.0, float(F - 1)]
+        plt.imshow(img, aspect="auto", origin="lower", extent=extent, vmin=vmin, vmax=vmax)
+        plt.xlabel("Time (s)"); plt.ylabel("Mel bins")
     else:
-        ft = a.T  # [T,F] -> [F,T]
-    return ft
-
-def save_mel_image_swapped(
-    mel_like: torch.Tensor | np.ndarray,
-    path: str,
-    *,
-    sr: int = 16000,
-    hop_length: int = 160,
-    n_mels_hint: int = 128,
-    vmin: float | None = None,
-    vmax: float | None = None,
-    title: str | None = None,
-):
-    """
-    Plot with **X = mel bins**, **Y = time (s)**.
-    """
-    try:
-        img_ft = _to_numpy_2d_ft(mel_like, n_mels_hint=n_mels_hint)  # [F,T]
-        img_tf = img_ft.T                                           # [T,F] for swapped axes
-
-        if vmin is None or vmax is None:
-            vmin = float(np.percentile(img_tf, 2.0))
-            vmax = float(np.percentile(img_tf, 98.0))
-
-        T, F = img_tf.shape
-        t_max = (T - 1) * (hop_length / sr)
-
-        plt.figure(figsize=(10, 4))
-        extent = [0.0, float(F - 1), 0.0, t_max]  # X: mel bins, Y: seconds
-        plt.imshow(img_tf, aspect="auto", origin="lower", extent=extent, vmin=vmin, vmax=vmax)
-        cbar = plt.colorbar(); cbar.set_label("log-mel")
+        # axes == "time-y": X: mel bins, Y: time(s)
+        extent = [0.0, float(F - 1), 0.0, t_max]
+        plt.imshow(img.T, aspect="auto", origin="lower", extent=extent, vmin=vmin, vmax=vmax)
         plt.xlabel("Mel bins"); plt.ylabel("Time (s)")
-        if title: plt.title(title)
-        plt.tight_layout()
-        plt.savefig(path, dpi=150)
-    except Exception as e:
-        print(f"[save_mel_image_swapped] non-fatal error: {e}", file=sys.stderr)
-    finally:
-        plt.close()
+
+    cbar = plt.colorbar(); cbar.set_label("log-mel")
+    if title: plt.title(title)
+    plt.tight_layout(); plt.savefig(path, dpi=150); plt.close()
 
 # ---------------- main ----------------
-
 def main():
-    parser = argparse.ArgumentParser(description="CKPT-only ascent with RMS-normalized comparison (no HF)")
-    parser.add_argument("--ckpt", type=str, default="/home/tori/.cache/audioldm/audioldm-s-full.ckpt")
-    parser.add_argument("--ref", type=str, default="trumpet.wav")
-    parser.add_argument("--sr", type=int, default=16000)
-    parser.add_argument("--duration", type=float, default=5.0)
-    parser.add_argument("--hop", type=int, default=80)
-    parser.add_argument("--n_mels", type=int, default=128)
-    parser.add_argument("--ascent_steps", type=int, default=25)
-    parser.add_argument("--inner_steps", type=int, default=12)
-    parser.add_argument("--guidance", type=float, default=2.5)
-    parser.add_argument("--tau", type=float, default=2.0)
-    parser.add_argument("--lr", type=float, default=1e-2)
-    parser.add_argument("--seed", type=int, default=1234)
-    parser.add_argument("--band_lo", type=int, default=64)
-    parser.add_argument("--band_hi", type=int, default=127)
-    parser.add_argument("--norm_dbfs", type=float, default=-20.0, help="RMS target (dBFS) for both plots")
-    args = parser.parse_args()
+    ap = argparse.ArgumentParser(description="CKPT-only ascent with explicit axes + normalization")
+    ap.add_argument("--ckpt", type=str, default="/home/tori/.cache/audioldm/audioldm-s-full.ckpt")
+    ap.add_argument("--ref", type=str, default="trumpet.wav")
+    ap.add_argument("--sr", type=int, default=16000)
+    ap.add_argument("--duration", type=float, default=5.0)
+    ap.add_argument("--hop", type=int, default=80)
+    ap.add_argument("--n_mels", type=int, default=128)
+    ap.add_argument("--ascent_steps", type=int, default=10)
+    ap.add_argument("--inner_steps", type=int, default=12)
+    ap.add_argument("--guidance", type=float, default=2.5)
+    ap.add_argument("--tau", type=float, default=2.0)
+    ap.add_argument("--lr", type=float, default=1e-2)
+    ap.add_argument("--seed", type=int, default=1234)
+    ap.add_argument("--band_lo", type=int, default=64)
+    ap.add_argument("--band_hi", type=int, default=127)
+    ap.add_argument("--norm_dbfs", type=float, default=-20.0)
+    ap.add_argument("--axes", type=str, default="time-x", choices=["time-x","time-y"])
+    args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"torch {torch.__version__}+cu{torch.version.cuda} | CUDA available: {torch.cuda.is_available()} | device: {device}")
+    print(f"torch {torch.__version__}+cu{torch.version.cuda} | CUDA={torch.cuda.is_available()} | device={device}")
 
-    print(f"Loading AudioLDM CKPT: {args.ckpt}")
+    # Load model
     ldm = build_model(args.ckpt)
 
     # Load reference audio
-    print(f"Loading reference audio: {args.ref}")
     try:
         ref_wav, _ = librosa.load(args.ref, sr=args.sr)
     except Exception as e:
-        print(f"[sample] Could not load {args.ref}: {e}. Using 440 Hz tone.", file=sys.stderr)
+        print(f"[sample] load failed ({e}); using 440Hz tone", file=sys.stderr)
         t = np.linspace(0, args.duration, int(args.sr * args.duration), endpoint=False)
-        ref_wav = 0.2 * np.sin(2 * np.pi * 440.0 * t).astype(np.float32)
+        ref_wav = 0.2 * np.sin(2*np.pi*440.0*t).astype(np.float32)
     ref_wave = torch.tensor(ref_wav, dtype=torch.float32, device=device).unsqueeze(0)
 
-    # Clamp synth duration to reference length
+    # Duration clamp
     ref_len_s = max(0.25, len(ref_wav) / float(args.sr))
     eff_duration = min(args.duration, ref_len_s)
 
-    print("Encoding audio condition (robust)...")
-    cond0 = encode_audio_cond(ldm, ref_wave, sr=args.sr)
+    # Encode conditioning (robust helper from your repo)
+    with torch.no_grad():
+        cond0 = encode_audio_cond(ldm, ref_wave, sr=args.sr)
     if not isinstance(cond0, torch.Tensor):
         cond0 = torch.zeros((1, 768), dtype=torch.float32, device=device)
 
-    # Objective
+    # Objective & mel transformer
     to_mel = WaveToMel(sr=args.sr, hop=args.hop, n_mels=args.n_mels)
     obj = band_energy_objective(to_mel, band=(args.band_lo, args.band_hi))
 
@@ -162,69 +149,64 @@ def main():
     opt = torch.optim.Adam([e], lr=args.lr)
 
     last_out = None
-    for t in range(args.ascent_steps):
+    for it in tqdm(range(args.ascent_steps)):
         opt.zero_grad(set_to_none=True)
-
         syn = generate_with_audio_cond(
-            ldm,
-            e,
-            steps=args.inner_steps,
-            guidance_scale=args.guidance,
-            duration_s=eff_duration,
-            seed=args.seed,
-            ref_path=args.ref,
-            sr=args.sr,
+            ldm, e, steps=args.inner_steps, guidance_scale=args.guidance,
+            duration_s=eff_duration, seed=args.seed, ref_path=args.ref, sr=args.sr
         )
         last_out = syn
-
         score = obj(syn if syn.ndim > 1 else syn.unsqueeze(0))
-        if score.ndim > 0:
-            score = score.mean()
-
+        if score.ndim: score = score.mean()
         reg = 1e-3 * (e - cond0).pow(2).mean()
         loss = -(score) + reg
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_([e], 5.0)
-        opt.step()
-
+        loss.backward(); torch.nn.utils.clip_grad_norm_([e], 5.0); opt.step()
         with torch.no_grad():
-            d = e - cond0
-            n = d.norm(p=2, dim=-1, keepdim=True).clamp_min(1e-12)
-            over = (n > args.tau).float()
-            e.data = (cond0 + d * (args.tau / n)) * over + e.data * (1 - over)
+            d = e - cond0; n = d.norm(p=2, dim=-1, keepdim=True).clamp_min(1e-12)
+            e.data = cond0 + d * (args.tau / n).clamp(max=1.0)
+        # if (it+1) % 5 == 0:
+        #     print(f"[{it+1}/{args.ascent_steps}] score={float(score):.6f}  loss={float(loss):.6f}")
 
-        if (t + 1) % 5 == 0:
-            print(f"[{t+1}/{args.ascent_steps}] score={float(score):.6f}  loss={float(loss):.6f}")
-
-    # ----- Build mel for FAIR comparison (RMS-normalized & shared scale) -----
-
-    # Normalize reference waveform for plotting
+    # ----- Build normalized mels in canonical [B,1,F,T] -----
     ref_wave_norm = normalize_rms(ref_wave, target_dbfs=args.norm_dbfs)
-    mel_ref = to_mel(ref_wave_norm)                # [B,1,F,T] (log-mel)
+    mel_ref = ensure_mel_b1ft(to_mel(ref_wave_norm.to("cpu")))        # [B,1,F,T]
 
-    # Ascent output: if waveform, RMS-normalize too; if mel-like, just use it
-    if isinstance(last_out, torch.Tensor) and last_out.ndim == 2 and last_out.size(1) > 4 * to_mel.n_fft:
-        asc_wave_norm = normalize_rms(last_out, target_dbfs=args.norm_dbfs)
-        mel_asc = to_mel(asc_wave_norm)
+    if isinstance(last_out, torch.Tensor) and last_out.ndim == 2 and last_out.size(1) > 4*to_mel.n_fft:
+        # asc_wave_norm = last_out
+        # asc_wave_norm = normalize_rms(last_out, target_dbfs=args.norm_dbfs)
+        mel_asc = ensure_mel_b1ft(to_mel(last_out))
     else:
-        mel_asc = last_out if isinstance(last_out, torch.Tensor) else torch.tensor(last_out, dtype=torch.float32)
+        mel_asc = ensure_mel_b1ft(last_out)
 
-    # Shared color scale (percentiles over both)
-    img_ref = _to_numpy_2d_ft(mel_ref, n_mels_hint=args.n_mels)
-    img_asc = _to_numpy_2d_ft(mel_asc, n_mels_hint=args.n_mels)
-    both = np.concatenate([img_ref.flatten(), img_asc.flatten()])
-    shared_vmin = float(np.percentile(both, 2.0))
-    shared_vmax = float(np.percentile(both, 98.0))
+    # Shared color scale
+    ref_img = mel_ref[0,0].detach().cpu().numpy()
+    asc_img = mel_asc[0,0].detach().cpu().numpy()
+    both = np.concatenate([ref_img.ravel(), asc_img.ravel()])
+    vmin = float(np.percentile(both, 2.0)); vmax = float(np.percentile(both, 98.0))
 
-    # Save figures (X = mel bins, Y = time)
-    save_mel_image_swapped(mel_ref, "original_norm.png",
-                           sr=args.sr, hop_length=args.hop, n_mels_hint=args.n_mels,
-                           vmin=shared_vmin, vmax=shared_vmax, title="Original (normalized)")
-    save_mel_image_swapped(mel_asc, "ascent_norm.png",
-                           sr=args.sr, hop_length=args.hop, n_mels_hint=args.n_mels,
-                           vmin=shared_vmin, vmax=shared_vmax, title="Ascent (normalized)")
+    # Plots with explicit axes
+    plot_mel_axes(
+        mel_ref, 
+        path="original_norm.png", 
+        sr=args.sr, 
+        hop=args.hop,
+        axes=args.axes, 
+        title="Original (normalized)", 
+        vmin=vmin, 
+        vmax=vmax
+    )
+    plot_mel_axes(
+        mel_asc, 
+        path="ascent_norm.png", 
+        sr=args.sr, 
+        hop=args.hop,
+        axes=args.axes, 
+        title="Ascent (normalized)",   
+        vmin=vmin, 
+        vmax=vmax
+    )
 
-    print("Done. Files written: original_norm.png, ascent_norm.png")
+    print(f"Done. Axes mode: {args.axes}. Files: original_norm.png, ascent_norm.png")
 
 
 if __name__ == "__main__":
