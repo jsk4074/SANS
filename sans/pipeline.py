@@ -11,6 +11,7 @@ from sans.utils import default_audioldm_config, get_duration, get_bit_depth, get
 from sans.audio import wav_to_fbank, TacotronSTFT, read_wav_file
 from sans.latent_diffusion.ddim import DDIMSampler
 from einops import repeat
+import contextlib
 import os
 
 def make_batch_for_text_to_audio(text, waveform=None, fbank=None, batchsize=1):
@@ -180,8 +181,9 @@ def style_transfer(
     t_enc = int(transfer_strength * ddim_steps)
     prompts = text
 
+    amp_ctx = autocast("cuda") if device.type == "cuda" else contextlib.nullcontext()
     with torch.no_grad():
-        with autocast("cuda"):
+        with amp_ctx:
             with latent_diffusion.ema_scope():
                 uc = None
                 if guidance_scale != 1.0:

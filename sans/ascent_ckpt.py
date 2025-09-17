@@ -1,74 +1,80 @@
+# sans/ascent_ckpt.py
+# -*- coding: utf-8 -*-
+
+from __future__ import annotations
+from typing import Optional
+
 import torch
-import torch.nn as nn
-from torch import optim
-from typing import Callable, Dict, Any, Optional
 
-def _project_l2(e, e0, tau):
-    d = e - e0
-    n = d.norm(p=2, dim=-1, keepdim=True).clamp_min(1e-12)
-    mask = (n > tau).float()
-    return (e0 + d * (tau / n)) * mask + e * (1 - mask)
+from sans.pipeline import style_transfer
+from sans.audio_utils import WaveToMel
 
-@torch.no_grad()
-def _seed(seed, device):
-    g = torch.Generator(device=device)
-    g.manual_seed(int(seed))
-    return g
 
-def get_audio_cond(ldm, wav_tensor, sr: int):
-    
-    mel = ldm.audio_augmentations(wav_tensor, sr)          
-    cond = ldm.audio_cond_encoder(mel)                     
-    return cond  
+def _require(cond: bool, msg: str):
+    if not cond:
+        raise AssertionError(msg)
 
-def generate_from_audio_cond(
+
+def encode_audio_cond(ldm, wave: torch.Tensor, sr: int = 16000) -> torch.Tensor:
+    """
+    Compute the SAME audio-conditioning embedding used by your style_transfer path.
+    Requires: ldm.audio_cond_encoder is bound and callable.
+    Always passes mel [B,1,F,T] to the encoder.
+    """
+    _require(isinstance(wave, torch.Tensor), "wave must be a torch.Tensor")
+    _require(wave.ndim in (2, 3), "wave shape must be [B,T] or [B,1,T]")
+    _require(hasattr(ldm, "audio_cond_encoder") and callable(getattr(ldm, "audio_cond_encoder")),
+             "ldm.audio_cond_encoder must exist and be callable")
+
+    to_mel = WaveToMel(sr=int(sr))
+    mel = to_mel(wave)  # [B,1,F,T]
+    cond = ldm.audio_cond_encoder(mel)
+    _require(isinstance(cond, torch.Tensor), "audio_cond_encoder must return a Tensor")
+    return cond
+
+
+def generate_with_audio_cond(
     ldm,
     cond_emb: torch.Tensor,
     *,
     steps: int = 12,
-    cfg: float = 2.5,
+    guidance_scale: float = 2.5,
     duration_s: float = 5.0,
     seed: int = 1234,
-    extra: Optional[Dict[str, Any]] = None,
-):
-    g = _seed(seed, cond_emb.device)
-    kwargs = dict(steps=steps, guidance_scale=cfg, duration=duration_s, generator=g)
-    if extra: kwargs.update(extra)
-    
-    out = ldm.generate_with_audio_cond(cond_emb=cond_emb, **kwargs)
-    
-    return out  
+    ref_path: Optional[str] = None,
+) -> torch.Tensor:
+    """
+    Generate audio using your sampler while *forcing* cond_emb as the
+    audio-conditioning embedding (no re-encoding). We patch ldm.audio_cond_encoder.
+    """
+    _require(isinstance(cond_emb, torch.Tensor), "cond_emb must be a torch.Tensor")
+    _require(hasattr(ldm, "audio_cond_encoder") and callable(getattr(ldm, "audio_cond_encoder")),
+             "ldm.audio_cond_encoder must exist and be callable")
 
-def optimize_audio_cond(
-    ldm,
-    init_cond: torch.Tensor,
-    objective_fn: Callable[[torch.Tensor], torch.Tensor],
-    *,
-    outer_steps: int = 25,
-    inner_steps: int = 12,
-    lr: float = 1e-2,
-    l2_anchor: float = 1e-3,
-    tau: float = 2.0,
-    cfg: float = 2.5,
-    duration_s: float = 5.0,
-    seed: int = 1234,
-):
-    e0 = init_cond.detach().clone()
-    e  = nn.Parameter(init_cond.clone().requires_grad_(True))
-    opt = optim.Adam([e], lr=lr)
-    last = None
-    for _ in range(outer_steps):
-        opt.zero_grad(set_to_none=True)
-        audio = generate_from_audio_cond(
-            ldm, e, steps=inner_steps, cfg=cfg, duration_s=duration_s, seed=seed
-        )
-        last = audio
-        score = objective_fn(audio)
-        if score.ndim: score = score.mean()
-        loss = -(score) + l2_anchor * (e - e0).pow(2).mean()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_([e], 5.0)
-        opt.step()
-        with torch.no_grad():
-            e.data = _project_l2(e.data, e0, tau)
-    return e.detach(), last
+    enc_old = ldm.audio_cond_encoder
+    def _return_cond_emb(*args, **kwargs):
+        return cond_emb
+
+    ldm.audio_cond_encoder = _return_cond_emb
+    wav = style_transfer(
+        ldm,
+        "",  # no text
+        original_audio_file_path=(ref_path if ref_path is not None else ""),
+        transfer_strength=0.0,
+        duration=duration_s,
+        output_type="waveform",
+        ddim_steps=steps,
+        guidance_scale=guidance_scale,
+        seed=seed,
+    )
+    ldm.audio_cond_encoder = enc_old
+
+    if not isinstance(wav, torch.Tensor):
+        wav = torch.tensor(wav, dtype=torch.float32, device=cond_emb.device)
+
+    if wav.ndim == 1:
+        wav = wav.unsqueeze(0)
+    if wav.device != cond_emb.device:
+        wav = wav.to(cond_emb.device)
+
+    return wav
