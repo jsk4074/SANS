@@ -85,6 +85,7 @@ bin/sans.cmd
 sans/__init__.py
 sans/__main__.py
 sans/ascent.py
+sans/audio_utils.py
 sans/ldm.py
 sans/objectives.py
 sans/pipeline.py

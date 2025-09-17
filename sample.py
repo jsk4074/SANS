@@ -1,5 +1,7 @@
 from sans import build_model
-from sans.pipeline import style_transfer
+from sans.pipeline import style_transfer, build_diffusers, ascent_transfer
+from sans.audio_utils import WaveToMel
+from sans.objectives import make_ae_recon_objective
 
 import matplotlib.pyplot as plt
 import librosa
@@ -56,20 +58,48 @@ def save_mel_image(
 
 ldm = build_model("/home/tori/.cache/audioldm/audioldm-s-full.ckpt")  # or your checkpoint 
 
-# 2) Style transfer → spectrogram 
-mel = style_transfer(
-    ldm, 
-    "",                  
-    original_audio_file_path="trumpet.wav", 
-    transfer_strength=0.3, 
-    duration=5.0, 
-    output_type="mel"
+# 2) (new) Diffusers pipeline for embedding ascent
+pipe = build_diffusers("cvssp/audioldm-s-full-v2")   # uses GPU if available
+
+# 3) Define an anomaly objective (example: AE recon on mel)
+ae_model = ...  # load your AE here
+to_mel = WaveToMel().to("cuda" if torch.cuda.is_available() else "cpu")
+obj = make_ae_recon_objective(ae_model, to_mel)
+
+# 4) Run ascent (text can be empty like your sample)
+mel_ascent = ascent_transfer(
+    pipe, "",                                # same shape of call as style_transfer
+    objective_fn=obj,
+    ascent_steps=25,
+    inner_ddim_steps=12,
+    guidance_scale=2.5,
+    duration=5.0,
+    tau=2.0,
+    lr=1e-2,
+    seed=1234,
+    output_type="mel",
+    to_mel=to_mel,                           # ensures same mel config as AE
 )
 
-org, sr = librosa.load("./trumpet.wav")
-org = librosa.feature.melspectrogram(y = org)
+# 5) For comparison: your existing style_transfer path (unchanged)
+mel_style = style_transfer(
+    ldm,
+    "",
+    original_audio_file_path="trumpet.wav",
+    transfer_strength=0.3,
+    duration=5.0,
+    output_type="mel",
+)
+
+# 6) Visualize
+org, sr = librosa.load("./trumpet.wav", sr=16000)
+org = librosa.feature.melspectrogram(y=org, sr=16000, hop_length=80, n_mels=128)
 org = torch.tensor(org)
+
 print(org.size())
-print(mel.size())
-save_mel_image(org, "original.png", sr=16000, hop_length=80)
-save_mel_image(mel, "src.png", sr=16000, hop_length=80)
+print(mel_style.size())
+print(mel_ascent.size())
+
+save_mel_image(org, "original.png", sr=16000, hop_length=80, title="Original")
+save_mel_image(mel_style, "src_style.png", sr=16000, hop_length=80, title="Style transfer")
+save_mel_image(mel_ascent, "src_ascent.png", sr=16000, hop_length=80, title="Ascent synthesis")
