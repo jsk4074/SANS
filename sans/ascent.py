@@ -39,7 +39,7 @@ class DiffusersAudioLDMWrapper:
         guidance_scale: float = 2.5,
         eta: float = 0.0,
         audio_length_in_s: float = 5.0,
-        seed: int = 1234,
+        seed: int = 7777,
         extra: Optional[Dict[str, Any]] = None,
     ) -> torch.Tensor:
         kw = dict(
