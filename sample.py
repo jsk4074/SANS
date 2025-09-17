@@ -182,13 +182,28 @@ def main():
     vmin_asc, vmax_asc = np.percentile(asc_img, [2,98]).tolist()
 
     # Plots — orientation chosen per image
-    plot_mel_auto(mel_ref, path="original_norm.png", sr=args.sr, hop=args.hop,
-                  expected_sec=ref_len_s, mode=args.axes, title="Original (RMS-normalized)",
-                  vmin=vmin_ref, vmax=vmax_ref)
+    plot_mel_auto(
+        mel_ref, 
+        path="original_norm.png", 
+        sr=args.sr, 
+        hop=args.hop,
+        expected_sec=ref_len_s, 
+        mode=args.axes, 
+        title="Original (RMS-normalized)",
+        vmin=vmin_ref, 
+        vmax=vmax_ref
+    )
 
-    plot_mel_auto(mel_asc, path="ascent.png", sr=args.sr, hop=args.hop,
-                  expected_sec=eff_duration, mode=args.axes, title="Ascent (as-is)",
-                  vmin=vmin_asc, vmax=vmax_asc)
+    # ASCENT: **force time on X, mel on Y**
+    plot_mel_auto(
+        mel_asc,
+        path="ascent.png",
+        sr=args.sr, hop=args.hop,
+        expected_sec=eff_duration,
+        mode="time-x",                           # <—— force correct orientation
+        title="Ascent (as-is, time on X)",
+        vmin=vmin_asc, vmax=vmax_asc,
+    )
 
     print(f"Done. Axes mode: {args.axes}. Files: original_norm.png, ascent.png")
 
